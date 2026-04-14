@@ -43,7 +43,17 @@
     import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight } from 'lucide-react';
 
     // --- 1. Firebase 初始化 ---
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const externalFirebaseConfig = {
+      apiKey: "AIzaSyAKitKzkqS5_K7lehivcAAZoGX_u4-LsQs",
+      authDomain: "typeace-c8f54.firebaseapp.com",
+      projectId: "typeace-c8f54",
+      storageBucket: "typeace-c8f54.firebasestorage.app",
+      messagingSenderId: "544799963119",
+      appId: "1:544799963119:web:25dbee6e8bad94ef70a81a",
+      measurementId: "G-2XZL871D6V"
+    };
+
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : externalFirebaseConfig;
     const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
     const auth = app ? getAuth(app) : null;
     const db = app ? getFirestore(app) : null;
@@ -428,7 +438,6 @@
         return items.map((para, pIdx) => (
           <div 
             key={pIdx} 
-            // 【修復核心】：移除不相容的 flex 標籤，讓文字正常斷行並還原字元自然間距
             className={`mb-8 select-none ${isBopo ? 'flex flex-wrap gap-y-12 justify-start' : 'text-left leading-[2.5]'}`}
           >
             {/* 首行實體透明縮排 (完美 2 格全形 / 5 格半形)。以 whitespace-pre 確保空格不被 HTML 壓縮吃掉 */}
