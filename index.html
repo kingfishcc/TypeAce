@@ -10,7 +10,34 @@
     @import url('https://cdn.jsdelivr.net/npm/gensen-rounded-web@1.0.1/css/gensen-rounded-tw.css');
     @import url('https://fonts.googleapis.com/css2?family=Chiron+GoRound+TC:wght@400;500;700&display=swap');
     @import url('https://fonts.googleapis.com/css2?family=Iansui&display=swap');
-    body { font-family: 'Chiron GoRound TC', 'GenSenRounded TW', sans-serif; }
+    body { 
+      font-family: 'Chiron GoRound TC', 'GenSenRounded TW', sans-serif;
+      background-color: #f8fafc;
+    }
+
+    /* 關鍵排版校準：還原緊湊自然的字距，徹底解決字元被拉開的問題 */
+    .typing-paragraph {
+      line-height: 2.2;
+      text-align: left; /* 靠左對齊，確保瀏覽器不自動調整字距 */
+      word-break: break-all;
+      margin-bottom: 1.5rem;
+      font-size: 24px;
+      letter-spacing: 0; /* 還原文字緊貼感 */
+      white-space: pre-wrap;
+    }
+
+    /* 首行自動縮排設定 (免按空白鍵) */
+    .indent-zh { text-indent: 2em; } /* 中文模式縮排 2 全形 */
+    .indent-en { text-indent: 5ch; } /* 英文模式縮排 5 字元 */
+
+    /* 注音模式專用縮排塊 (精確對應 2 個注音方塊寬度) */
+    .bopo-indent-block {
+      display: inline-block;
+      width: 9.5rem; 
+      height: 1px;
+    }
+
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
   </style>
 
   <script type="importmap">
@@ -37,10 +64,10 @@
     import { initializeApp } from 'firebase/app';
     import { 
       getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-      signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup
+      signOut, GoogleAuthProvider, signInWithPopup 
     } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight } from 'lucide-react';
+    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle } from 'lucide-react';
 
     // --- 1. Firebase 初始化 ---
     const externalFirebaseConfig = {
@@ -52,8 +79,8 @@
       appId: "1:544799963119:web:25dbee6e8bad94ef70a81a",
       measurementId: "G-2XZL871D6V"
     };
-    
-    const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) ? JSON.parse(__firebase_config) : externalFirebaseConfig;
+
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : externalFirebaseConfig;
     const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
     const auth = app ? getAuth(app) : null;
     const db = app ? getFirestore(app) : null;
@@ -76,14 +103,9 @@
       return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
 
-    // 預設備用題庫
     const FALLBACK_DB = {
-      zh: [
-        "這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"
-      ],
-      en: [
-        "This is the fallback database. Please check if the external file is loaded correctly."
-      ]
+      zh: ["這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"],
+      en: ["This is the fallback database. Please check if the external file is loaded correctly."]
     };
 
     // --- 3. 排名系統與徽章 ---
@@ -164,9 +186,8 @@
       const [stats, setStats] = useState({ speed: 0, accuracy: 0, rank: null, typed: 0, correct: 0, timeElapsed: 0 });
       const [publicScores, setPublicScores] = useState([]);
       const [personalHistory, setPersonalHistory] = useState([]);
-      const [authEmail, setAuthEmail] = useState('');
       const [authError, setAuthError] = useState('');
-      const [systemWarning, setSystemWarning] = useState(''); // 新增：用於顯示 Firebase 權限警告
+      const [systemWarning, setSystemWarning] = useState('');
       const [isAuthenticating, setIsAuthenticating] = useState(false);
       const [leaderboardMode, setLeaderboardMode] = useState('zh'); 
       
@@ -188,9 +209,10 @@
 
       useEffect(() => { if (!hasSeenWelcome) setActiveModal('welcome'); }, [hasSeenWelcome]);
 
-      // --- 讀取外部 JSON ---
+      // --- 讀取外部 JSON (加入時間戳記防 GitHub 快取) ---
       useEffect(() => {
-        fetch('articles.json')
+        // 利用 ?t= 時間戳，強迫瀏覽器每次都抓最新的 articles.json，避免改了檔案卻還是舊資料的問題
+        fetch('articles.json?t=' + new Date().getTime())
           .then(res => {
             if (!res.ok) throw new Error('找不到外部題庫檔案');
             return res.json();
@@ -199,6 +221,7 @@
           .catch(err => {
             console.warn("無法讀取外部 articles.json，自動切換為內建備用題庫。", err);
             setArticleDatabase(FALLBACK_DB);
+            setSystemWarning("無法讀取題庫！請確認 articles.json 與 index.html 放在 GitHub 的同一個資料夾。");
           });
       }, []);
 
@@ -351,7 +374,7 @@
         else { setNameError(""); localStorage.setItem('typingHeroName', n); }
       };
 
-      // Google 登入 (加入 unauthorized-domain 防護與明確提示)
+      // --- Google 登入 (加入防護) ---
       const handleGoogleLogin = async () => {
         if (!auth) return;
         setAuthError('');
@@ -364,12 +387,13 @@
             setDisplayName(n); localStorage.setItem('typingHeroName', n);
           }
           setActiveModal('none');
+          setSystemWarning('');
         } catch (err) { 
-          console.error("登入失敗:", err); 
+          console.error(err); 
           if (err.code === 'auth/unauthorized-domain') {
-            setAuthError("【網域未授權】您的 Firebase 尚未允許目前的網址進行登入。請至 Firebase 控制台 > Authentication > 設定 (Settings) > 已授權網域，將您目前的網址加入白名單！");
+            setAuthError("【網域未授權】您的 Firebase 尚未允許目前的網址。請至 Firebase 控制台 > Authentication > 設定 > 已授權網域，將 kingfishcc.github.io 加入名單中！");
           } else {
-            setAuthError(`登入發生錯誤 (${err.code})，請稍後再試。`);
+            setAuthError("登入發生錯誤，請稍後再試。");
           }
         } finally {
           setIsAuthenticating(false);
@@ -399,32 +423,31 @@
         setActiveModal('settlement');
         let safe = displayName.trim();
         if (!safe || hasProfanity(safe)) { safe = generateDefaultName(); setDisplayName(safe); localStorage.setItem('typingHeroName', safe); }
+        
         if (user && db && spd > 0) {
           const data = { userId: user.uid, displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: serverTimestamp() };
           try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), data);
             await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), data);
-            setSystemWarning(''); // 儲存成功就清除警告
+            setSystemWarning('');
           } catch (err) { 
-            console.error("成績儲存失敗:", err); 
-            if (err.code === 'permission-denied' || err.message.includes('permission')) {
-              setSystemWarning("【成績儲存失敗】您的 Firestore 規則尚未開放寫入權限，請依照上方提示修改 Firebase 規則！");
+            console.error(err); 
+            if (err.code === 'permission-denied') {
+              setSystemWarning("【成績儲存失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
             }
           }
         }
       };
 
-      // 監聽排行榜 (加入 permission-denied 防護與明確提示)
       useEffect(() => {
         if (!user || !db) return;
         const unsubPublic = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPublicScores(all);
-          setSystemWarning(''); // 讀取成功清除警告
+          setSystemWarning('');
         }, (err) => {
-          console.error("讀取公開排行榜失敗:", err);
-          if (err.code === 'permission-denied' || err.message.includes('permission')) {
-            setSystemWarning("【資料庫被鎖住了！】請至 Firebase 控制台 > Firestore Database > 規則 (Rules)，將內容改成「allow read, write: if true;」然後發布，才能正常存取成績。");
+          if (err.code === 'permission-denied') {
+            setSystemWarning("【排行榜讀取失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
           }
         });
         return () => unsubPublic();
@@ -435,8 +458,6 @@
         const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPersonalHistory(all.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
-        }, (err) => {
-          console.error("讀取個人戰績失敗:", err);
         });
         return () => unsubPrivate();
       }, [user, db]);
@@ -461,9 +482,10 @@
             key={pIdx} 
             className={`mb-8 select-none ${isBopo ? 'flex flex-wrap gap-y-12 justify-start' : 'text-left leading-[2.5]'}`}
           >
+            {/* 首行縮排 */}
             {!isBopo && !isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"　　"}</span>}
             {!isBopo && isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"     "}</span>}
-            {isBopo && <span className="inline-block w-[9rem] shrink-0 pointer-events-none" />}
+            {isBopo && <span className="inline-block w-[9.5rem] shrink-0 pointer-events-none" />}
 
             {isBopo ? para.map((item, i) => {
               const idx = globalIdx++; 
@@ -556,11 +578,11 @@
         <div className="min-h-screen w-full relative flex flex-col items-center">
           <div className="max-w-4xl w-full space-y-6 flex flex-col items-center mx-auto pb-10 pt-4 px-4">
             
-            {/* 新增的 Firebase 錯誤警告橫幅 */}
+            {/* 錯誤警告橫幅 */}
             {systemWarning && (
-              <div className="w-full bg-red-50 border-l-4 border-red-500 p-4 rounded-2xl shadow-sm flex items-start gap-3 mt-2 animate-in slide-in-from-top-4">
-                <span className="text-xl">⚠️</span>
-                <p className="text-sm font-black text-red-700 leading-relaxed">{systemWarning}</p>
+              <div className="w-full bg-red-50 border-l-4 border-red-500 p-4 rounded-2xl shadow-sm flex items-start gap-3 mt-2">
+                <AlertTriangle className="text-red-600 shrink-0" size={24} />
+                <p className="text-sm font-bold text-red-800 leading-relaxed">{systemWarning}</p>
               </div>
             )}
 
@@ -590,7 +612,7 @@
                 <span className="text-[11px] font-black text-red-500 whitespace-nowrap leading-none">{nameError ? `（${nameError}）` : "（禁止不雅暱稱）"}</span>
                 {user && !user.isAnonymous ? 
                   <button onClick={handleLogout} className="bg-slate-100 text-slate-500 px-5 py-2.5 rounded-xl text-xs font-black hover:bg-red-50 hover:text-red-600 flex items-center shadow-sm"><LogOut size={12} className="mr-1.5" /> 登出</button> :
-                  <button onClick={() => setActiveModal('auth')} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-black hover:bg-blue-700 flex items-center shadow-sm"><Mail size={12} className="mr-1.5" /> 綁定 Gmail</button>
+                  <button onClick={() => setActiveModal('auth')} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-black hover:bg-blue-700 flex items-center shadow-sm"><Mail size={12} className="mr-1.5" /> 登入存戰績</button>
                 }
               </div>
             </header>
@@ -776,16 +798,19 @@
               {activeModal === 'auth' && (
                 <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl p-10 relative animate-in zoom-in-95 text-center text-slate-800">
                   <button onClick={() => setActiveModal('none')} className="absolute top-6 right-6 text-slate-400"><X size={24} /></button>
-                  <div className="flex justify-center mb-6"><div className="p-5 bg-blue-50 text-blue-600 rounded-full shadow-inner">
-                    <svg className="w-12 h-12" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                  </div></div>
-                  <div>
-                    <h3 className="text-2xl font-black mb-2">Google 帳號登入</h3>
-                    <p className="text-slate-400 text-sm leading-relaxed">一鍵登入即可同步各裝置的戰績，<br/>您隨時可以在上方修改暱稱！</p>
-                  </div>
+                  <div className="flex justify-center mb-6"><div className="p-5 bg-blue-50 text-blue-600 rounded-full shadow-inner"><Mail size={40} /></div></div>
+                  <h3 className="text-2xl font-black text-center mb-2">Google 帳號登入</h3>
+                  <p className="text-slate-400 text-xs mb-8 leading-relaxed">請確認您的網址已加入 Firebase 授權名單</p>
                   <div className="space-y-6 mt-6">
                     {authError && <div className="text-red-500 text-[11px] font-black text-left bg-red-50 p-3 rounded-xl border border-red-100">{authError}</div>}
                     <button onClick={handleGoogleLogin} disabled={isAuthenticating} className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-95">
+                      <svg className="w-6 h-6 mr-3" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        <path fill="none" d="M1 1h22v22H1z" />
+                      </svg>
                       使用 Google 登入
                     </button>
                     <button onClick={()=>setActiveModal('none')} className="text-slate-300 text-xs font-bold hover:text-slate-500">暫不登入</button>
