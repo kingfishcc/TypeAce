@@ -37,7 +37,7 @@
     import { initializeApp } from 'firebase/app';
     import { 
       getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-      signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut 
+      signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup
     } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
     import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight } from 'lucide-react';
@@ -52,8 +52,8 @@
       appId: "1:544799963119:web:25dbee6e8bad94ef70a81a",
       measurementId: "G-2XZL871D6V"
     };
-
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : externalFirebaseConfig;
+    
+    const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) ? JSON.parse(__firebase_config) : externalFirebaseConfig;
     const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
     const auth = app ? getAuth(app) : null;
     const db = app ? getFirestore(app) : null;
@@ -76,7 +76,7 @@
       return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
 
-    // 預設備用題庫 (已縮短以防程式碼被截斷)
+    // 預設備用題庫
     const FALLBACK_DB = {
       zh: [
         "這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"
@@ -102,7 +102,7 @@
       return 'bg-white border border-slate-200 text-slate-400';
     };
 
-    // --- 4. 單字元元件 (還原自然字距、防重疊紅字框) ---
+    // --- 4. 單字元元件 ---
     const CharSpan = React.memo(({ char, idx, isTyped, isCorrect, isWrong, isCurrent, userChar, activeRef, onCharClick }) => {
       if (char === '\n') return null; 
       return (
@@ -166,6 +166,7 @@
       const [personalHistory, setPersonalHistory] = useState([]);
       const [authEmail, setAuthEmail] = useState('');
       const [authError, setAuthError] = useState('');
+      const [systemWarning, setSystemWarning] = useState(''); // 新增：用於顯示 Firebase 權限警告
       const [isAuthenticating, setIsAuthenticating] = useState(false);
       const [leaderboardMode, setLeaderboardMode] = useState('zh'); 
       
@@ -253,19 +254,16 @@
         const rawText = pool[articleIndex % pool.length];
         
         if (mode === 'en') {
-          // 英文：段落間補單一空白以無縫銜接，不留換行符號
           const paras = rawText.split('\n').filter(p => p.trim().length > 0)
                                .map((p, i, arr) => i < arr.length - 1 ? p.trim() + ' ' : p.trim());
           setCurrentParagraphs(paras);
           setTargetText(paras.join('')); 
         } else if (mode === 'zh') {
-          // 純中文：拔除注音並消除所有空格，段落間直接無縫銜接
           const finalContent = rawText.replace(/\(.*?\)/g, '').replace(/ /g, '');
           const paras = finalContent.split('\n').filter(p => p.trim().length > 0);
           setCurrentParagraphs(paras);
           setTargetText(paras.join('')); 
         } else if (mode === 'zh-bopo') {
-          // 注音：段落間直接無縫銜接
           const paras = rawText.replace(/ /g, '').split('\n').filter(p => p.trim().length > 0);
           const bopoParas = paras.map(paraStr => {
             const parsed = [];
@@ -303,7 +301,6 @@
         let val = e.target.value;
         const newCursor = e.target.selectionStart;
         
-        // 由於我們已經全面移除 \n，這裡的安全過濾機制確保學生誤按 Enter 時不會破壞節奏
         if (val.length > userInput.length) {
           const addedChar = val[newCursor - 1];
           if (addedChar === '\n') {
@@ -354,20 +351,29 @@
         else { setNameError(""); localStorage.setItem('typingHeroName', n); }
       };
 
-      const handleSimpleAuth = async (e) => {
-        e.preventDefault();
-        if (!authEmail || !authEmail.includes('@')) { setAuthError("請輸入正確的 Gmail"); return; }
+      // Google 登入 (加入 unauthorized-domain 防護與明確提示)
+      const handleGoogleLogin = async () => {
+        if (!auth) return;
+        setAuthError('');
         setIsAuthenticating(true);
-        const pwd = `th_pwd_${authEmail.split('@')[0]}`;
         try {
-          try { await signInWithEmailAndPassword(auth, authEmail, pwd); }
-          catch (err) { 
-            if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') await createUserWithEmailAndPassword(auth, authEmail, pwd);
-            else throw err; 
+          const provider = new GoogleAuthProvider();
+          const result = await signInWithPopup(auth, provider);
+          if (result.user && result.user.displayName && displayName.startsWith('匿名挑戰者')) {
+            const n = result.user.displayName.substring(0, 12);
+            setDisplayName(n); localStorage.setItem('typingHeroName', n);
           }
-          setActiveModal('none'); setAuthError(''); setAuthEmail('');
-        } catch (err) { setAuthError("登入失敗"); }
-        finally { setIsAuthenticating(false); }
+          setActiveModal('none');
+        } catch (err) { 
+          console.error("登入失敗:", err); 
+          if (err.code === 'auth/unauthorized-domain') {
+            setAuthError("【網域未授權】您的 Firebase 尚未允許目前的網址進行登入。請至 Firebase 控制台 > Authentication > 設定 (Settings) > 已授權網域，將您目前的網址加入白名單！");
+          } else {
+            setAuthError(`登入發生錯誤 (${err.code})，請稍後再試。`);
+          }
+        } finally {
+          setIsAuthenticating(false);
+        }
       };
 
       const handleLogout = async () => {
@@ -398,27 +404,42 @@
           try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), data);
             await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), data);
-          } catch (err) { console.error(err); }
+            setSystemWarning(''); // 儲存成功就清除警告
+          } catch (err) { 
+            console.error("成績儲存失敗:", err); 
+            if (err.code === 'permission-denied' || err.message.includes('permission')) {
+              setSystemWarning("【成績儲存失敗】您的 Firestore 規則尚未開放寫入權限，請依照上方提示修改 Firebase 規則！");
+            }
+          }
         }
       };
 
+      // 監聽排行榜 (加入 permission-denied 防護與明確提示)
       useEffect(() => {
         if (!user || !db) return;
         const unsubPublic = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPublicScores(all);
+          setSystemWarning(''); // 讀取成功清除警告
+        }, (err) => {
+          console.error("讀取公開排行榜失敗:", err);
+          if (err.code === 'permission-denied' || err.message.includes('permission')) {
+            setSystemWarning("【資料庫被鎖住了！】請至 Firebase 控制台 > Firestore Database > 規則 (Rules)，將內容改成「allow read, write: if true;」然後發布，才能正常存取成績。");
+          }
         });
         return () => unsubPublic();
-      }, [user]);
+      }, [user, db]);
 
       useEffect(() => {
         if (!user || !db) return;
         const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPersonalHistory(all.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+        }, (err) => {
+          console.error("讀取個人戰績失敗:", err);
         });
         return () => unsubPrivate();
-      }, [user]);
+      }, [user, db]);
 
       const filteredLeaderboard = publicScores.filter(d => d.mode === leaderboardMode).sort((a, b) => b.speed - a.speed);
       const uniqueLeaderboard = [];
@@ -440,7 +461,6 @@
             key={pIdx} 
             className={`mb-8 select-none ${isBopo ? 'flex flex-wrap gap-y-12 justify-start' : 'text-left leading-[2.5]'}`}
           >
-            {/* 首行實體透明縮排 (完美 2 格全形 / 5 格半形)。以 whitespace-pre 確保空格不被 HTML 壓縮吃掉 */}
             {!isBopo && !isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"　　"}</span>}
             {!isBopo && isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"     "}</span>}
             {isBopo && <span className="inline-block w-[9rem] shrink-0 pointer-events-none" />}
@@ -535,6 +555,15 @@
       return (
         <div className="min-h-screen w-full relative flex flex-col items-center">
           <div className="max-w-4xl w-full space-y-6 flex flex-col items-center mx-auto pb-10 pt-4 px-4">
+            
+            {/* 新增的 Firebase 錯誤警告橫幅 */}
+            {systemWarning && (
+              <div className="w-full bg-red-50 border-l-4 border-red-500 p-4 rounded-2xl shadow-sm flex items-start gap-3 mt-2 animate-in slide-in-from-top-4">
+                <span className="text-xl">⚠️</span>
+                <p className="text-sm font-black text-red-700 leading-relaxed">{systemWarning}</p>
+              </div>
+            )}
+
             <header className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-200 w-full flex flex-col items-center gap-6">
               <div className="flex items-center space-x-3"><Keyboard size={32} className="text-blue-600" /><h1 className="text-3xl font-black tracking-tighter">鍵盤神手</h1></div>
               
@@ -747,14 +776,20 @@
               {activeModal === 'auth' && (
                 <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl p-10 relative animate-in zoom-in-95 text-center text-slate-800">
                   <button onClick={() => setActiveModal('none')} className="absolute top-6 right-6 text-slate-400"><X size={24} /></button>
-                  <div className="flex justify-center mb-6"><div className="p-5 bg-blue-50 text-blue-600 rounded-full shadow-inner"><Mail size={40} /></div></div>
-                  <h3 className="text-2xl font-black text-center mb-2">Gmail 快速登入</h3>
-                  <p className="text-slate-400 text-xs mb-8 leading-relaxed">輸入信箱即可同步戰績，更換裝置免煩惱</p>
-                  <form onSubmit={handleSimpleAuth} className="space-y-6">
-                    <input type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-blue-100 text-lg font-bold text-center" placeholder="yourname@gmail.com" required />
-                    {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
-                    <button type="submit" disabled={isAuthenticating} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl text-lg shadow-lg transition-all active:scale-95">開始同步</button>
-                  </form>
+                  <div className="flex justify-center mb-6"><div className="p-5 bg-blue-50 text-blue-600 rounded-full shadow-inner">
+                    <svg className="w-12 h-12" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                  </div></div>
+                  <div>
+                    <h3 className="text-2xl font-black mb-2">Google 帳號登入</h3>
+                    <p className="text-slate-400 text-sm leading-relaxed">一鍵登入即可同步各裝置的戰績，<br/>您隨時可以在上方修改暱稱！</p>
+                  </div>
+                  <div className="space-y-6 mt-6">
+                    {authError && <div className="text-red-500 text-[11px] font-black text-left bg-red-50 p-3 rounded-xl border border-red-100">{authError}</div>}
+                    <button onClick={handleGoogleLogin} disabled={isAuthenticating} className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl flex items-center justify-center gap-3 hover:bg-blue-700 transition-all active:scale-95">
+                      使用 Google 登入
+                    </button>
+                    <button onClick={()=>setActiveModal('none')} className="text-slate-300 text-xs font-bold hover:text-slate-500">暫不登入</button>
+                  </div>
                 </div>
               )}
             </div>
