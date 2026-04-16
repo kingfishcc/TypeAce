@@ -103,9 +103,14 @@
       return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
 
+    // 精簡版備用題庫（避免輸出超長被截斷，完整題庫請依賴 articles.json）
     const FALLBACK_DB = {
-      zh: ["這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"],
-      en: ["This is the fallback database. Please check if the external file is loaded correctly."]
+      "zh": [
+        "這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"
+      ],
+      "en": [
+        "This is the fallback database. Please check if the external file is loaded correctly."
+      ]
     };
 
     // --- 3. 排名系統與徽章 ---
@@ -194,6 +199,9 @@
       const [articleDatabase, setArticleDatabase] = useState(null);
       const [articleIndex, setArticleIndex] = useState(0);
 
+      // 新增：偵測是否為 IG / LINE / FB 內建瀏覽器
+      const [isWebView, setIsWebView] = useState(false);
+
       const [hasSeenWelcome, setHasSeenWelcome] = useState(() => {
         try { return localStorage.getItem('typingHeroWelcome') === 'true'; } 
         catch(e) { return false; }
@@ -209,9 +217,17 @@
 
       useEffect(() => { if (!hasSeenWelcome) setActiveModal('welcome'); }, [hasSeenWelcome]);
 
+      // 新增：在畫面載入時檢查 User Agent
+      useEffect(() => {
+        const ua = navigator.userAgent || navigator.vendor || window.opera;
+        // 偵測 Instagram, Facebook, Line 等 App 內建瀏覽器
+        if (ua.includes('Instagram') || ua.includes('FBAN') || ua.includes('FBAV') || ua.includes('Line')) {
+          setIsWebView(true);
+        }
+      }, []);
+
       // --- 讀取外部 JSON (加入時間戳記防 GitHub 快取) ---
       useEffect(() => {
-        // 利用 ?t= 時間戳，強迫瀏覽器每次都抓最新的 articles.json，避免改了檔案卻還是舊資料的問題
         fetch('articles.json?t=' + new Date().getTime())
           .then(res => {
             if (!res.ok) throw new Error('找不到外部題庫檔案');
@@ -221,7 +237,7 @@
           .catch(err => {
             console.warn("無法讀取外部 articles.json，自動切換為內建備用題庫。", err);
             setArticleDatabase(FALLBACK_DB);
-            setSystemWarning("無法讀取題庫！請確認 articles.json 與 index.html 放在 GitHub 的同一個資料夾。");
+            setSystemWarning("無法讀取題庫！請確認 articles.json 與 index.html 放在同一個資料夾。");
           });
       }, []);
 
@@ -374,7 +390,6 @@
         else { setNameError(""); localStorage.setItem('typingHeroName', n); }
       };
 
-      // --- Google 登入 (加入防護) ---
       const handleGoogleLogin = async () => {
         if (!auth) return;
         setAuthError('');
@@ -389,11 +404,11 @@
           setActiveModal('none');
           setSystemWarning('');
         } catch (err) { 
-          console.error(err); 
+          console.error("登入失敗:", err); 
           if (err.code === 'auth/unauthorized-domain') {
-            setAuthError("【網域未授權】您的 Firebase 尚未允許目前的網址。請至 Firebase 控制台 > Authentication > 設定 > 已授權網域，將 kingfishcc.github.io 加入名單中！");
+            setAuthError("【網域未授權】您的 Firebase 尚未允許目前的網址進行登入。請至 Firebase 控制台加入白名單！");
           } else {
-            setAuthError("登入發生錯誤，請稍後再試。");
+            setAuthError(`登入發生錯誤 (${err.code})，請稍後再試。`);
           }
         } finally {
           setIsAuthenticating(false);
@@ -432,7 +447,7 @@
             setSystemWarning('');
           } catch (err) { 
             console.error(err); 
-            if (err.code === 'permission-denied') {
+            if (err.code === 'permission-denied' || err.message.includes('permission')) {
               setSystemWarning("【成績儲存失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
             }
           }
@@ -446,7 +461,7 @@
           setPublicScores(all);
           setSystemWarning('');
         }, (err) => {
-          if (err.code === 'permission-denied') {
+          if (err.code === 'permission-denied' || err.message.includes('permission')) {
             setSystemWarning("【排行榜讀取失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
           }
         });
@@ -458,6 +473,8 @@
         const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPersonalHistory(all.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+        }, (err) => {
+          console.error("讀取個人戰績失敗:", err);
         });
         return () => unsubPrivate();
       }, [user, db]);
@@ -482,7 +499,6 @@
             key={pIdx} 
             className={`mb-8 select-none ${isBopo ? 'flex flex-wrap gap-y-12 justify-start' : 'text-left leading-[2.5]'}`}
           >
-            {/* 首行縮排 */}
             {!isBopo && !isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"　　"}</span>}
             {!isBopo && isEn && <span className="inline-block opacity-0 pointer-events-none select-none whitespace-pre text-[20px] md:text-[24px]">{"     "}</span>}
             {isBopo && <span className="inline-block w-[9.5rem] shrink-0 pointer-events-none" />}
@@ -578,6 +594,17 @@
         <div className="min-h-screen w-full relative flex flex-col items-center">
           <div className="max-w-4xl w-full space-y-6 flex flex-col items-center mx-auto pb-10 pt-4 px-4">
             
+            {/* 新增的 IG/LINE 內建瀏覽器警告 */}
+            {isWebView && (
+              <div className="w-full bg-red-600 text-white p-4 rounded-2xl shadow-md flex items-center gap-3 mt-2 animate-in slide-in-from-top-4">
+                <AlertTriangle className="shrink-0" size={24} />
+                <p className="text-sm font-bold leading-relaxed text-left">
+                  注意：您目前使用的是 App 內建瀏覽器，<span className="text-yellow-300">Google登入與戰績儲存功能將無法正常運作！</span><br/>
+                  請點擊右上角的「⋯」，選擇「以預設瀏覽器開啟 (Safari/Chrome)」。
+                </p>
+              </div>
+            )}
+
             {/* 錯誤警告橫幅 */}
             {systemWarning && (
               <div className="w-full bg-red-50 border-l-4 border-red-500 p-4 rounded-2xl shadow-sm flex items-start gap-3 mt-2">
@@ -612,7 +639,7 @@
                 <span className="text-[11px] font-black text-red-500 whitespace-nowrap leading-none">{nameError ? `（${nameError}）` : "（禁止不雅暱稱）"}</span>
                 {user && !user.isAnonymous ? 
                   <button onClick={handleLogout} className="bg-slate-100 text-slate-500 px-5 py-2.5 rounded-xl text-xs font-black hover:bg-red-50 hover:text-red-600 flex items-center shadow-sm"><LogOut size={12} className="mr-1.5" /> 登出</button> :
-                  <button onClick={() => setActiveModal('auth')} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-black hover:bg-blue-700 flex items-center shadow-sm"><Mail size={12} className="mr-1.5" /> 登入存戰績</button>
+                  <button onClick={() => setActiveModal('auth')} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-black hover:bg-blue-700 flex items-center shadow-sm"><Mail size={12} className="mr-1.5" /> Google 登入</button>
                 }
               </div>
             </header>
@@ -713,7 +740,7 @@
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-4 w-full">
-                    <button onClick={openAuthFromWelcome} className="flex-1 flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-black py-4 rounded-2xl transition-all shadow-sm"><Mail size={18} className="mr-2" />綁定 Gmail 存戰績</button>
+                    <button onClick={openAuthFromWelcome} className="flex-1 flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-black py-4 rounded-2xl transition-all shadow-sm"><Mail size={18} className="mr-2" />Google 登入存戰績</button>
                     <button onClick={closeWelcome} className="flex-1 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all shadow-md">直接開始<ArrowRight size={18} className="ml-2" /></button>
                   </div>
                 </div>
