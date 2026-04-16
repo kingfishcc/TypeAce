@@ -279,10 +279,16 @@
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
               await signInWithCustomToken(auth, __initial_auth_token);
             } else { await signInAnonymously(auth); }
-          } catch (error) { console.error("Auth error:", error); }
+          } catch (error) { 
+            console.error("Auth error:", error); 
+            // 【修復核心】：解決無痕模式阻擋 Firebase 登入的問題，自動核發「本機臨時身分」
+            setUser({ uid: `incognito_${Math.random().toString(36).substring(2, 12)}`, isAnonymous: true });
+          }
         };
         initAuth();
-        const unsubscribe = onAuthStateChanged(auth, setUser);
+        const unsubscribe = onAuthStateChanged(auth, (u) => {
+          if (u) setUser(u);
+        });
         return () => unsubscribe();
       }, []);
 
@@ -440,56 +446,56 @@
         let safe = displayName.trim();
         if (!safe || hasProfanity(safe)) { safe = generateDefaultName(); setDisplayName(safe); localStorage.setItem('typingHeroName', safe); }
         
-        if (user && db && spd > 0) {
-          const data = { userId: user.uid, displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: serverTimestamp() };
+        // 修正：無論一般或無痕模式，確保有 ID 可供存取
+        if (db && spd > 0) {
+          const currentUserId = user ? user.uid : `incognito_${Math.random().toString(36).substring(2, 12)}`;
+          const data = { userId: currentUserId, displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: serverTimestamp() };
+          
           try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), data);
-            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), data);
+            await addDoc(collection(db, 'artifacts', appId, 'users', currentUserId, 'scores'), data);
             setSystemWarning('');
 
             // --- 自動清理機制：每個模式只保留最新的 5 筆戰績 ---
-            const userScoresRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scores');
+            const userScoresRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'scores');
             const snap = await getDocs(userScoresRef);
             const userRecords = [];
             snap.forEach(d => userRecords.push({ id: d.id, ...d.data() }));
             
-            // 過濾出與這次相同模式的戰績
             const currentModeRecords = userRecords.filter(r => r.mode === mode);
-            // 依照時間排序 (剛存入的 timestamp 可能為空，視為無限大 Infinity 排在最前面)
             currentModeRecords.sort((a, b) => (b.timestamp?.seconds || Infinity) - (a.timestamp?.seconds || Infinity));
             
-            // 如果該模式戰績超過 5 筆，則把第 6 筆以後的刪除
             if (currentModeRecords.length > 5) {
               const recordsToDelete = currentModeRecords.slice(5);
               for (const record of recordsToDelete) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'scores', record.id));
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'scores', record.id));
               }
             }
-            // --------------------------------------------------
-
           } catch (err) { 
             console.error(err); 
-            if (err.code === 'permission-denied' || err.message.includes('permission')) {
+            if (err.code === 'permission-denied' || err.message?.includes('permission')) {
               setSystemWarning("【成績儲存失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
             }
           }
         }
       };
 
+      // 全服排行榜
       useEffect(() => {
-        if (!user || !db) return;
+        if (!user || !db) return; // 【修復核心】：加入 !user 判斷，確保無痕身分建立後才去要資料，以免被擋
         const unsubPublic = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPublicScores(all);
           setSystemWarning('');
         }, (err) => {
-          if (err.code === 'permission-denied' || err.message.includes('permission')) {
+          if (err.code === 'permission-denied' || err.message?.includes('permission')) {
             setSystemWarning("【排行榜讀取失敗】Firestore 資料庫規則尚未開放。請至 Firebase > Firestore > 規則，設定 allow read, write: if true; 並發布。");
           }
         });
         return () => unsubPublic();
       }, [user, db]);
 
+      // 個人戰績
       useEffect(() => {
         if (!user || !db) return;
         const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
@@ -504,8 +510,16 @@
       const filteredLeaderboard = publicScores.filter(d => d.mode === leaderboardMode).sort((a, b) => b.speed - a.speed);
       const uniqueLeaderboard = [];
       const seenUsers = new Set();
-      for (let d of filteredLeaderboard) { if (!seenUsers.has(d.userId)) { seenUsers.add(d.userId); uniqueLeaderboard.push(d); } }
-      const globalLeaderboard = uniqueLeaderboard.slice(0, 10);
+      for (let d of filteredLeaderboard) { 
+        // 修正：改用「ID + 暱稱」來去重複，讓同一台電腦不同學生換名字也能上榜
+        const uniqueKey = `${d.userId}_${d.displayName}`;
+        if (!seenUsers.has(uniqueKey)) { 
+          seenUsers.add(uniqueKey); 
+          uniqueLeaderboard.push(d); 
+        } 
+      }
+      // 修正：解除 10 名限制，放寬顯示前 100 名
+      const globalLeaderboard = uniqueLeaderboard.slice(0, 100);
 
       const closeWelcome = () => { setHasSeenWelcome(true); localStorage.setItem('typingHeroWelcome', 'true'); setActiveModal('none'); setTimeout(() => inputRef.current?.focus(), 100); };
       const openAuthFromWelcome = () => { setHasSeenWelcome(true); localStorage.setItem('typingHeroWelcome', 'true'); setActiveModal('auth'); };
