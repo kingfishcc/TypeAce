@@ -66,7 +66,8 @@
       getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
       signOut, GoogleAuthProvider, signInWithPopup 
     } from 'firebase/auth';
-    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+    // 新增引入 getDocs, deleteDoc, doc
+    import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, getDocs, deleteDoc, doc } from 'firebase/firestore';
     import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle } from 'lucide-react';
 
     // --- 1. Firebase 初始化 ---
@@ -445,6 +446,27 @@
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), data);
             await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), data);
             setSystemWarning('');
+
+            // --- 自動清理機制：每個模式只保留最新的 5 筆戰績 ---
+            const userScoresRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scores');
+            const snap = await getDocs(userScoresRef);
+            const userRecords = [];
+            snap.forEach(d => userRecords.push({ id: d.id, ...d.data() }));
+            
+            // 過濾出與這次相同模式的戰績
+            const currentModeRecords = userRecords.filter(r => r.mode === mode);
+            // 依照時間排序 (剛存入的 timestamp 可能為空，視為無限大 Infinity 排在最前面)
+            currentModeRecords.sort((a, b) => (b.timestamp?.seconds || Infinity) - (a.timestamp?.seconds || Infinity));
+            
+            // 如果該模式戰績超過 5 筆，則把第 6 筆以後的刪除
+            if (currentModeRecords.length > 5) {
+              const recordsToDelete = currentModeRecords.slice(5);
+              for (const record of recordsToDelete) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'scores', record.id));
+              }
+            }
+            // --------------------------------------------------
+
           } catch (err) { 
             console.error(err); 
             if (err.code === 'permission-denied' || err.message.includes('permission')) {
