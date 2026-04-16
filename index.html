@@ -15,22 +15,19 @@
       background-color: #f8fafc;
     }
 
-    /* 關鍵排版校準：還原緊湊自然的字距，徹底解決字元被拉開的問題 */
     .typing-paragraph {
       line-height: 2.2;
-      text-align: left; /* 靠左對齊，確保瀏覽器不自動調整字距 */
+      text-align: left;
       word-break: break-all;
       margin-bottom: 1.5rem;
       font-size: 24px;
-      letter-spacing: 0; /* 還原文字緊貼感 */
+      letter-spacing: 0;
       white-space: pre-wrap;
     }
 
-    /* 首行自動縮排設定 (免按空白鍵) */
-    .indent-zh { text-indent: 2em; } /* 中文模式縮排 2 全形 */
-    .indent-en { text-indent: 5ch; } /* 英文模式縮排 5 字元 */
+    .indent-zh { text-indent: 2em; }
+    .indent-en { text-indent: 5ch; }
 
-    /* 注音模式專用縮排塊 (精確對應 2 個注音方塊寬度) */
     .bopo-indent-block {
       display: inline-block;
       width: 9.5rem; 
@@ -66,9 +63,8 @@
       getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
       signOut, GoogleAuthProvider, signInWithPopup 
     } from 'firebase/auth';
-    // 新增引入 getDocs, deleteDoc, doc
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, getDocs, deleteDoc, doc } from 'firebase/firestore';
-    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle } from 'lucide-react';
+    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle, Settings, Trash2 } from 'lucide-react';
 
     // --- 1. Firebase 初始化 ---
     const externalFirebaseConfig = {
@@ -104,7 +100,6 @@
       return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     };
 
-    // 精簡版備用題庫（避免輸出超長被截斷，完整題庫請依賴 articles.json）
     const FALLBACK_DB = {
       "zh": [
         "這(ㄓㄜˋ) 是(ㄕˋ) 備(ㄅㄟˋ) 用(ㄩㄥˋ) 題(ㄊㄧˊ) 庫(ㄎㄨˋ) ， 請(ㄑㄧㄥˇ) 確(ㄑㄩㄝˋ) 認(ㄖㄣˋ) 外(ㄨㄞˋ) 部(ㄅㄨˋ) 檔(ㄉㄤˇ) 案(ㄢˋ) 是(ㄕˋ) 否(ㄈㄡˇ) 載(ㄗㄞˋ) 入(ㄖㄨˋ) 成(ㄔㄥˊ) 功(ㄍㄨㄥ) 。"
@@ -176,6 +171,17 @@
 
     function App() {
       const [user, setUser] = useState(null);
+      
+      const [localUid] = useState(() => {
+        let id = localStorage.getItem('typingHeroLocalUid');
+        if (!id) {
+          id = `anon_${Math.random().toString(36).substring(2, 12)}`;
+          localStorage.setItem('typingHeroLocalUid', id);
+        }
+        return id;
+      });
+      const activeUid = user ? user.uid : localUid;
+
       const [displayName, setDisplayName] = useState(() => localStorage.getItem('typingHeroName') || generateDefaultName());
       const [nameError, setNameError] = useState(""); 
       const [mode, setMode] = useState('zh'); 
@@ -199,9 +205,14 @@
       
       const [articleDatabase, setArticleDatabase] = useState(null);
       const [articleIndex, setArticleIndex] = useState(0);
-
-      // 新增：偵測是否為 IG / LINE / FB 內建瀏覽器
       const [isWebView, setIsWebView] = useState(false);
+
+      // 開發者權限相關 State
+      const [isDeveloper, setIsDeveloper] = useState(false);
+      const [devUsername, setDevUsername] = useState('');
+      const [devPassword, setDevPassword] = useState('');
+      const [devError, setDevError] = useState('');
+      const [recordToDelete, setRecordToDelete] = useState(null); // { type: 'public' | 'private', id: string }
 
       const [hasSeenWelcome, setHasSeenWelcome] = useState(() => {
         try { return localStorage.getItem('typingHeroWelcome') === 'true'; } 
@@ -218,16 +229,13 @@
 
       useEffect(() => { if (!hasSeenWelcome) setActiveModal('welcome'); }, [hasSeenWelcome]);
 
-      // 新增：在畫面載入時檢查 User Agent
       useEffect(() => {
         const ua = navigator.userAgent || navigator.vendor || window.opera;
-        // 偵測 Instagram, Facebook, Line 等 App 內建瀏覽器
         if (ua.includes('Instagram') || ua.includes('FBAN') || ua.includes('FBAV') || ua.includes('Line')) {
           setIsWebView(true);
         }
       }, []);
 
-      // --- 讀取外部 JSON (加入時間戳記防 GitHub 快取) ---
       useEffect(() => {
         fetch('articles.json?t=' + new Date().getTime())
           .then(res => {
@@ -242,7 +250,6 @@
           });
       }, []);
 
-      // --- 自動置中捲動 ---
       useEffect(() => {
         if (cursorRef.current && containerRef.current && status === 'playing') {
           const container = containerRef.current;
@@ -278,16 +285,16 @@
           try {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
               await signInWithCustomToken(auth, __initial_auth_token);
-            } else { await signInAnonymously(auth); }
+            } else { 
+              await signInAnonymously(auth); 
+            }
           } catch (error) { 
-            console.error("Auth error:", error); 
-            // 【修復核心】：解決無痕模式阻擋 Firebase 登入的問題，自動核發「本機臨時身分」
-            setUser({ uid: `incognito_${Math.random().toString(36).substring(2, 12)}`, isAnonymous: true });
+            console.error("Firebase 匿名登入失敗:", error); 
           }
         };
         initAuth();
         const unsubscribe = onAuthStateChanged(auth, (u) => {
-          if (u) setUser(u);
+          setUser(u); 
         });
         return () => unsubscribe();
       }, []);
@@ -397,6 +404,20 @@
         else { setNameError(""); localStorage.setItem('typingHeroName', n); }
       };
 
+      // 開發者登入處理
+      const handleDevLogin = (e) => {
+        e.preventDefault();
+        if (devUsername === 'kingfish' && devPassword === '0403') {
+          setIsDeveloper(true);
+          setActiveModal('welcome');
+          setDevUsername('');
+          setDevPassword('');
+          setDevError('');
+        } else {
+          setDevError('帳號或密碼錯誤！');
+        }
+      };
+
       const handleGoogleLogin = async () => {
         if (!auth) return;
         setAuthError('');
@@ -424,7 +445,7 @@
 
       const handleLogout = async () => {
         await signOut(auth);
-        await signInAnonymously(auth);
+        try { await signInAnonymously(auth); } catch(e) {}
         const n = generateDefaultName(); setDisplayName(n); localStorage.setItem('typingHeroName', n);
       };
 
@@ -446,18 +467,15 @@
         let safe = displayName.trim();
         if (!safe || hasProfanity(safe)) { safe = generateDefaultName(); setDisplayName(safe); localStorage.setItem('typingHeroName', safe); }
         
-        // 修正：無論一般或無痕模式，確保有 ID 可供存取
         if (db && spd > 0) {
-          const currentUserId = user ? user.uid : `incognito_${Math.random().toString(36).substring(2, 12)}`;
-          const data = { userId: currentUserId, displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: serverTimestamp() };
+          const data = { userId: activeUid, displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: serverTimestamp() };
           
           try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), data);
-            await addDoc(collection(db, 'artifacts', appId, 'users', currentUserId, 'scores'), data);
+            await addDoc(collection(db, 'artifacts', appId, 'users', activeUid, 'scores'), data);
             setSystemWarning('');
 
-            // --- 自動清理機制：每個模式只保留最新的 5 筆戰績 ---
-            const userScoresRef = collection(db, 'artifacts', appId, 'users', currentUserId, 'scores');
+            const userScoresRef = collection(db, 'artifacts', appId, 'users', activeUid, 'scores');
             const snap = await getDocs(userScoresRef);
             const userRecords = [];
             snap.forEach(d => userRecords.push({ id: d.id, ...d.data() }));
@@ -468,7 +486,7 @@
             if (currentModeRecords.length > 5) {
               const recordsToDelete = currentModeRecords.slice(5);
               for (const record of recordsToDelete) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'scores', record.id));
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', activeUid, 'scores', record.id));
               }
             }
           } catch (err) { 
@@ -480,9 +498,8 @@
         }
       };
 
-      // 全服排行榜
       useEffect(() => {
-        if (!user || !db) return; // 【修復核心】：加入 !user 判斷，確保無痕身分建立後才去要資料，以免被擋
+        if (!db) return; 
         const unsubPublic = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPublicScores(all);
@@ -493,32 +510,29 @@
           }
         });
         return () => unsubPublic();
-      }, [user, db]);
+      }, [db]);
 
-      // 個人戰績
       useEffect(() => {
-        if (!user || !db) return;
-        const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
+        if (!db) return;
+        const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', activeUid, 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPersonalHistory(all.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
         }, (err) => {
           console.error("讀取個人戰績失敗:", err);
         });
         return () => unsubPrivate();
-      }, [user, db]);
+      }, [db, activeUid]);
 
       const filteredLeaderboard = publicScores.filter(d => d.mode === leaderboardMode).sort((a, b) => b.speed - a.speed);
       const uniqueLeaderboard = [];
       const seenUsers = new Set();
       for (let d of filteredLeaderboard) { 
-        // 修正：改用「ID + 暱稱」來去重複，讓同一台電腦不同學生換名字也能上榜
         const uniqueKey = `${d.userId}_${d.displayName}`;
         if (!seenUsers.has(uniqueKey)) { 
           seenUsers.add(uniqueKey); 
           uniqueLeaderboard.push(d); 
         } 
       }
-      // 修正：解除 10 名限制，放寬顯示前 100 名
       const globalLeaderboard = uniqueLeaderboard.slice(0, 100);
 
       const closeWelcome = () => { setHasSeenWelcome(true); localStorage.setItem('typingHeroWelcome', 'true'); setActiveModal('none'); setTimeout(() => inputRef.current?.focus(), 100); };
@@ -630,7 +644,6 @@
         <div className="min-h-screen w-full relative flex flex-col items-center">
           <div className="max-w-4xl w-full space-y-6 flex flex-col items-center mx-auto pb-10 pt-4 px-4">
             
-            {/* 新增的 IG/LINE 內建瀏覽器警告 */}
             {isWebView && (
               <div className="w-full bg-red-600 text-white p-4 rounded-2xl shadow-md flex items-center gap-3 mt-2 animate-in slide-in-from-top-4">
                 <AlertTriangle className="shrink-0" size={24} />
@@ -641,7 +654,6 @@
               </div>
             )}
 
-            {/* 錯誤警告橫幅 */}
             {systemWarning && (
               <div className="w-full bg-red-50 border-l-4 border-red-500 p-4 rounded-2xl shadow-sm flex items-start gap-3 mt-2">
                 <AlertTriangle className="text-red-600 shrink-0" size={24} />
@@ -649,8 +661,14 @@
               </div>
             )}
 
-            <header className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-200 w-full flex flex-col items-center gap-6">
-              <div className="flex items-center space-x-3"><Keyboard size={32} className="text-blue-600" /><h1 className="text-3xl font-black tracking-tighter">鍵盤神手</h1></div>
+            <header className="bg-white p-8 rounded-[32px] shadow-sm border border-slate-200 w-full flex flex-col items-center gap-6 relative">
+              <div className="flex items-center space-x-3">
+                <Keyboard size={32} className="text-blue-600" />
+                <h1 className="text-3xl font-black tracking-tighter flex items-center">
+                  鍵盤神手
+                  {isDeveloper && <span className="ml-3 px-2.5 py-1 bg-slate-800 text-white text-[11px] font-bold rounded-lg tracking-widest shadow-sm">開發者</span>}
+                </h1>
+              </div>
               
               <div className="flex flex-col items-center gap-2.5 w-full">
                 <div className="bg-slate-50 border border-slate-100 p-1 rounded-2xl flex gap-1 w-full max-w-xs justify-around shadow-inner">
@@ -749,9 +767,11 @@
           </div>
 
           {activeModal !== 'none' && (
-            <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-40 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4">
+              
               {activeModal === 'welcome' && (
                 <div className="bg-white rounded-[40px] shadow-2xl w-full max-w-xl p-10 relative text-slate-800 animate-in zoom-in-95 flex flex-col items-center text-center">
+                  <button onClick={() => setActiveModal('devLogin')} className="absolute top-6 left-6 text-slate-200 hover:text-slate-400 transition-colors" title="開發者登入"><Settings size={24} /></button>
                   <div className="bg-blue-100 text-blue-600 p-4 rounded-full mb-6"><Keyboard size={48} /></div>
                   <h2 className="text-3xl font-black mb-4 tracking-tighter">歡迎來到鍵盤神手！</h2>
                   <div className="flex flex-col items-center justify-center mb-6 w-full">
@@ -782,6 +802,20 @@
                 </div>
               )}
 
+              {activeModal === 'devLogin' && (
+                <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-md p-10 relative animate-in zoom-in-95 text-center text-slate-800">
+                  <button onClick={() => setActiveModal('welcome')} className="absolute top-6 right-6 text-slate-400"><X size={24} /></button>
+                  <div className="flex justify-center mb-6"><div className="p-5 bg-slate-100 text-slate-600 rounded-full shadow-inner"><Settings size={40} /></div></div>
+                  <h3 className="text-2xl font-black text-center mb-6">開發者登入</h3>
+                  <form onSubmit={handleDevLogin} className="space-y-4">
+                    <input type="text" value={devUsername} onChange={e=>setDevUsername(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-slate-200 text-lg font-bold" placeholder="開發者帳號" required />
+                    <input type="password" value={devPassword} onChange={e=>setDevPassword(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-slate-200 text-lg font-bold" placeholder="密碼" required />
+                    {devError && <p className="text-red-500 text-xs font-bold text-left pl-2">{devError}</p>}
+                    <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-black py-4 rounded-2xl text-lg shadow-lg transition-all active:scale-95 mt-4">登入</button>
+                  </form>
+                </div>
+              )}
+
               {activeModal === 'rankInfo' && (
                 <div className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl p-10 relative text-slate-800 animate-in fade-in flex flex-col">
                   <button onClick={() => setActiveModal('history')} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 z-10"><X size={28} /></button>
@@ -806,7 +840,7 @@
                   <div className="flex justify-center mb-6 shrink-0"><div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1">{[['zh','中文'],['zh-bopo','中文（注音）'],['en','英文']].map(([k,v]) => (<button key={k} onClick={() => setLeaderboardMode(k)} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${leaderboardMode===k ? 'bg-white text-teal-600 shadow-sm':'text-slate-400 hover:text-slate-700'}`}>{v}</button>))}</div></div>
                   <div className="space-y-4 overflow-y-auto pr-4 scrollbar-hide flex-grow">
                     {globalLeaderboard.length ? globalLeaderboard.map((r, i) => (
-                      <div key={r.id} className={`flex items-center justify-between p-5 rounded-3xl border transition-all ${r.userId === user?.uid ? 'bg-teal-50 border-teal-200' : 'bg-slate-50 border-transparent'}`}>
+                      <div key={r.id} className={`flex items-center justify-between p-5 rounded-3xl border transition-all ${r.userId === activeUid ? 'bg-teal-50 border-teal-200' : 'bg-slate-50 border-transparent'}`}>
                         <div className="flex items-center space-x-5">
                           <span className={`w-10 h-10 flex items-center justify-center rounded-full text-lg font-black ${getMedalStyle(i)}`}>{i+1}</span>
                           <div className="flex flex-col text-left">
@@ -814,7 +848,14 @@
                             <span className="text-[11px] font-bold text-slate-400 mt-0.5">{formatTime(r.timestamp)}</span>
                           </div>
                         </div>
-                        <span className="font-black text-slate-800 text-4xl">{r.speed} <span className="text-xs font-bold text-slate-400">{leaderboardMode==='en'?'WPM':'CPM'}</span></span>
+                        <div className="flex items-center gap-4">
+                          <span className="font-black text-slate-800 text-4xl">{r.speed} <span className="text-xs font-bold text-slate-400">{leaderboardMode==='en'?'WPM':'CPM'}</span></span>
+                          {isDeveloper && (
+                            <button onClick={() => setRecordToDelete({ type: 'public', id: r.id })} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-xl transition-colors" title="刪除此紀錄">
+                              <Trash2 size={20} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )) : <div className="py-12 flex flex-col items-center justify-center space-y-4"><Medal className="text-slate-100" size={64} /><p className="text-base font-medium text-slate-300">目前尚無神手紀錄</p></div>}
                   </div>
@@ -838,7 +879,14 @@
                                 <span className="text-xl font-black text-slate-700">{r.rankName} <span className="text-slate-400 text-sm font-normal">（{r.timeLimit/60}分）</span></span>
                                 <span className="text-sm font-bold text-slate-400 mt-1">準確率 {r.accuracy}% • {formatTime(r.timestamp)}</span>
                               </div>
-                              <span className="font-black text-slate-800 text-4xl">{r.speed} <span className="text-xs font-bold text-slate-400">{mKey==='en'?'WPM':'CPM'}</span></span>
+                              <div className="flex items-center gap-4">
+                                <span className="font-black text-slate-800 text-4xl">{r.speed} <span className="text-xs font-bold text-slate-400">{mKey==='en'?'WPM':'CPM'}</span></span>
+                                {isDeveloper && (
+                                  <button onClick={() => setRecordToDelete({ type: 'private', id: r.id })} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-xl transition-colors" title="刪除此紀錄">
+                                    <Trash2 size={20} />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           ))}</div>
                         </div>
@@ -882,6 +930,35 @@
               )}
             </div>
           )}
+
+          {/* 開發者刪除確認視窗 - 獨立於 activeModal 之外，可疊加顯示 */}
+          {recordToDelete && (
+            <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95">
+                <div className="mx-auto w-16 h-16 bg-red-100 text-red-600 flex items-center justify-center rounded-full mb-4">
+                  <Trash2 size={32} />
+                </div>
+                <h3 className="text-xl font-black mb-2">確定刪除紀錄？</h3>
+                <p className="text-slate-500 text-sm mb-8">此動作無法復原，請確認是否繼續。</p>
+                <div className="flex gap-4">
+                  <button onClick={() => setRecordToDelete(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">取消</button>
+                  <button onClick={async () => {
+                    try {
+                      const deletePath = recordToDelete.type === 'public' 
+                        ? doc(db, 'artifacts', appId, 'public', 'data', 'scores', recordToDelete.id)
+                        : doc(db, 'artifacts', appId, 'users', activeUid, 'scores', recordToDelete.id);
+                      await deleteDoc(deletePath);
+                      setRecordToDelete(null);
+                    } catch(e) {
+                      alert("刪除失敗，請檢查 Firebase 權限：" + e.message);
+                      setRecordToDelete(null);
+                    }
+                  }} className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all shadow-md">確定刪除</button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       );
     }
