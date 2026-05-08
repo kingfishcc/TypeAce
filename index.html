@@ -64,7 +64,7 @@
       signOut, GoogleAuthProvider, signInWithPopup 
     } from 'firebase/auth';
     import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, getDocs, deleteDoc, doc } from 'firebase/firestore';
-    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle, Settings, Trash2 } from 'lucide-react';
+    import { Trophy, Clock, User, Globe, RotateCcw, Medal, Keyboard, Mail, X, LogOut, ArrowRight, AlertTriangle, Trash2, Settings } from 'lucide-react';
 
     // --- 1. Firebase 初始化 ---
     const externalFirebaseConfig = {
@@ -173,6 +173,16 @@
     function App() {
       const [user, setUser] = useState(null);
 
+      const [localUid] = useState(() => {
+        let id = localStorage.getItem('typingHeroLocalUid');
+        if (!id) {
+          id = `anon_${Math.random().toString(36).substring(2, 12)}`;
+          localStorage.setItem('typingHeroLocalUid', id);
+        }
+        return id;
+      });
+      const activeUid = user ? user.uid : localUid;
+
       const [displayName, setDisplayName] = useState(() => localStorage.getItem('typingHeroName') || generateDefaultName());
       const [nameError, setNameError] = useState(""); 
       const [mode, setMode] = useState('zh'); 
@@ -198,8 +208,8 @@
       const [articleIndex, setArticleIndex] = useState(0);
       const [isWebView, setIsWebView] = useState(false);
 
+      // 開發者權限相關
       const [isDeveloper, setIsDeveloper] = useState(false);
-      const [devUsername, setDevUsername] = useState('');
       const [devPassword, setDevPassword] = useState('');
       const [devError, setDevError] = useState('');
       const [recordToDelete, setRecordToDelete] = useState(null); 
@@ -395,19 +405,6 @@
         else { setNameError(""); localStorage.setItem('typingHeroName', n); }
       };
 
-      const handleDevLogin = (e) => {
-        e.preventDefault();
-        if (devUsername === 'kingfish' && devPassword === '0403') {
-          setIsDeveloper(true);
-          setActiveModal('welcome');
-          setDevUsername('');
-          setDevPassword('');
-          setDevError('');
-        } else {
-          setDevError('帳號或密碼錯誤！');
-        }
-      };
-
       const handleGoogleLogin = async () => {
         if (!auth) return;
         setAuthError('');
@@ -466,7 +463,7 @@
             await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), data);
             setSystemWarning('');
 
-            // --- 自動清理機制：每個模式只保留最新的 5 筆戰績 ---
+            // 自動清理機制：每個模式只保留最新的 5 筆戰績
             const userScoresRef = collection(db, 'artifacts', appId, 'users', user.uid, 'scores');
             const snap = await getDocs(userScoresRef);
             const userRecords = [];
@@ -488,24 +485,21 @@
             }
           }
         } else if (!user && spd > 0) {
-          // 本機戰績備援機制 (針對無法取得 Firebase 身分的狀況，如無痕模式)
-          const localRecord = { id: Date.now().toString(), speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: new Date().toISOString(), isLocal: true };
+          // 本機戰績備援機制
+          const localRecord = { id: Date.now().toString(), displayName: safe, speed: spd, accuracy: Math.round(acc), mode, timeLimit: selectedTime, rankName: rk.name, timestamp: new Date().toISOString(), isLocal: true };
           const stored = JSON.parse(localStorage.getItem('typingHeroFallbackScores') || '[]');
           stored.push(localRecord);
-          // 保留各模式最新的 5 筆
           const currentModeRecords = stored.filter(r => r.mode === mode);
           currentModeRecords.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           const otherModes = stored.filter(r => r.mode !== mode);
           const newStored = [...otherModes, ...currentModeRecords.slice(0, 5)];
           localStorage.setItem('typingHeroFallbackScores', JSON.stringify(newStored));
-          // 強制更新畫面
-          setPersonalHistory(newStored.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
         }
       };
 
-      // 監聽全服排行榜 (受 Firestore 規則保護，必須有 user)
+      // 監聽全服排行榜
       useEffect(() => {
-        if (!user || !db) return; 
+        if (!db) return; 
         const unsubPublic = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), (snap) => {
           let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
           setPublicScores(all);
@@ -516,23 +510,19 @@
           }
         });
         return () => unsubPublic();
-      }, [user, db]);
+      }, [db]);
 
-      // 監聽個人戰績 (受 Firestore 規則保護，必須有 user)
+      // 個人戰績從 publicScores 中透過 displayName 篩選，達成「認名不認機」
       useEffect(() => {
-        if (!user || !db) {
+        if (!db) {
           const stored = JSON.parse(localStorage.getItem('typingHeroFallbackScores') || '[]');
-          setPersonalHistory(stored.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+          const myStoredScores = stored.filter(r => r.displayName === displayName);
+          setPersonalHistory(myStoredScores.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
           return;
         }
-        const unsubPrivate = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'scores'), (snap) => {
-          let all = []; snap.forEach(d => all.push({ id: d.id, ...d.data() }));
-          setPersonalHistory(all.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
-        }, (err) => {
-          console.error("讀取個人戰績失敗:", err);
-        });
-        return () => unsubPrivate();
-      }, [user, db]);
+        const myScores = publicScores.filter(r => r.displayName === displayName);
+        setPersonalHistory(myScores.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+      }, [publicScores, displayName, db]);
 
       const filteredLeaderboard = publicScores.filter(d => d.mode === leaderboardMode).sort((a, b) => b.speed - a.speed);
       const uniqueLeaderboard = [];
@@ -700,7 +690,7 @@
               </div>
               <div className="flex items-center justify-center gap-3 w-full pt-2 border-t border-slate-50">
                 <User size={22} className={user && !user.isAnonymous ? "text-blue-500" : "text-slate-300"} />
-                <div className="relative w-40 h-10"><input type="text" value={displayName} onChange={handleNameChange} className="absolute inset-0 w-full h-full bg-transparent border-none text-xl font-black outline-none focus:ring-2 focus:ring-slate-200 text-center leading-[2.5rem] rounded-xl" maxLength={12} autoComplete="off" /></div>
+                <div className="relative w-40 h-10"><input type="text" value={displayName} onChange={handleNameChange} disabled={isDeveloper} className={`absolute inset-0 w-full h-full bg-transparent border-none text-xl font-black outline-none focus:ring-2 focus:ring-slate-200 text-center leading-[2.5rem] rounded-xl ${isDeveloper ? 'text-indigo-600' : ''}`} maxLength={12} autoComplete="off" /></div>
                 <span className="text-[11px] font-black text-red-500 whitespace-nowrap leading-none">{nameError ? `（${nameError}）` : "（禁止不雅暱稱）"}</span>
                 {user && !user.isAnonymous ? 
                   <button onClick={handleLogout} className="bg-slate-100 text-slate-500 px-5 py-2.5 rounded-xl text-xs font-black hover:bg-red-50 hover:text-red-600 flex items-center shadow-sm"><LogOut size={12} className="mr-1.5" /> 登出</button> :
@@ -786,16 +776,16 @@
                   <div className="bg-blue-100 text-blue-600 p-4 rounded-full mb-6"><Keyboard size={48} /></div>
                   <h2 className="text-3xl font-black mb-4 tracking-tighter">歡迎來到鍵盤神手！</h2>
                   <div className="flex flex-col items-center justify-center mb-6 w-full">
-                    <p className="text-slate-500 font-bold mb-3">系統已為您建立臨時身分：</p>
+                    <p className="text-slate-500 font-bold mb-3">{isDeveloper ? '您已切換至開發者模式：' : '系統已為您建立臨時身分：'}</p>
                     <div className="relative w-full max-w-xs h-12 bg-blue-50 rounded-2xl border-2 border-blue-100">
-                      <input type="text" value={displayName} onChange={handleNameChange} className="absolute inset-0 w-full h-full bg-transparent border-none text-2xl font-black text-blue-600 outline-none focus:ring-2 focus:ring-blue-300 text-center leading-[3rem] rounded-2xl" maxLength={12} autoComplete="off" />
+                      <input type="text" value={displayName} onChange={handleNameChange} disabled={isDeveloper} className={`absolute inset-0 w-full h-full bg-transparent border-none text-2xl font-black outline-none focus:ring-2 focus:ring-blue-300 text-center leading-[3rem] rounded-2xl ${isDeveloper ? 'text-indigo-600' : 'text-blue-600'}`} maxLength={12} autoComplete="off" />
                     </div>
                     {nameError && <p className="text-red-500 text-xs font-black mt-2">（{nameError}）</p>}
                   </div>
                   <div className="bg-slate-50 p-6 rounded-3xl w-full mb-8 text-left space-y-4 border border-slate-100">
                     <div className="flex items-start">
                       <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center font-black text-sm shrink-0 mr-3 mt-0.5">1</span>
-                      <p className="font-bold text-slate-700">您可以隨時點擊修改您的顯示名稱。</p>
+                      <p className="font-bold text-slate-700">您可以點擊上方框框修改暱稱。<span className="text-blue-600">只要記住名稱，下次輸入相同名稱就能找回戰績！</span></p>
                     </div>
                     <div className="flex items-start">
                       <span className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center font-black text-sm shrink-0 mr-3 mt-0.5">2</span>
@@ -815,14 +805,26 @@
 
               {activeModal === 'devLogin' && (
                 <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-md p-10 relative animate-in zoom-in-95 text-center text-slate-800">
-                  <button onClick={() => setActiveModal('welcome')} className="absolute top-6 right-6 text-slate-400"><X size={24} /></button>
+                  <button onClick={() => setActiveModal('welcome')} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600"><X size={24} /></button>
                   <div className="flex justify-center mb-6"><div className="p-5 bg-slate-100 text-slate-600 rounded-full shadow-inner"><Settings size={40} /></div></div>
-                  <h3 className="text-2xl font-black text-center mb-6">開發者登入</h3>
-                  <form onSubmit={handleDevLogin} className="space-y-4">
-                    <input type="text" value={devUsername} onChange={e=>setDevUsername(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-slate-200 text-lg font-bold" placeholder="開發者帳號" required />
-                    <input type="password" value={devPassword} onChange={e=>setDevPassword(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-slate-200 text-lg font-bold" placeholder="密碼" required />
-                    {devError && <p className="text-red-500 text-xs font-bold text-left pl-2">{devError}</p>}
-                    <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-black py-4 rounded-2xl text-lg shadow-lg transition-all active:scale-95 mt-4">登入</button>
+                  <h3 className="text-2xl font-black text-center mb-6">開發者驗證</h3>
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    if (devPassword === '0403') {
+                      setIsDeveloper(true);
+                      setDisplayName('開發者');
+                      localStorage.setItem('typingHeroName', '開發者');
+                      setNameError('');
+                      setActiveModal('welcome');
+                      setDevPassword('');
+                      setDevError('');
+                    } else {
+                      setDevError('密碼錯誤！');
+                    }
+                  }} className="space-y-4">
+                    <input type="password" value={devPassword} onChange={e=>setDevPassword(e.target.value)} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 outline-none focus:ring-4 focus:ring-slate-200 text-2xl font-black text-center tracking-[0.5em]" placeholder="請輸入密碼" required autoFocus />
+                    {devError && <p className="text-red-500 text-xs font-bold text-center">{devError}</p>}
+                    <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-black py-4 rounded-2xl text-lg shadow-lg transition-all active:scale-95 mt-4">解鎖權限</button>
                   </form>
                 </div>
               )}
@@ -851,7 +853,7 @@
                   <div className="flex justify-center mb-6 shrink-0"><div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1">{[['zh','中文'],['zh-bopo','中文（注音）'],['en','英文']].map(([k,v]) => (<button key={k} onClick={() => setLeaderboardMode(k)} className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${leaderboardMode===k ? 'bg-white text-teal-600 shadow-sm':'text-slate-400 hover:text-slate-700'}`}>{v}</button>))}</div></div>
                   <div className="space-y-4 overflow-y-auto pr-4 scrollbar-hide flex-grow">
                     {globalLeaderboard.length ? globalLeaderboard.map((r, i) => (
-                      <div key={r.id} className={`flex items-center justify-between p-5 rounded-3xl border transition-all ${r.userId === user?.uid ? 'bg-teal-50 border-teal-200' : 'bg-slate-50 border-transparent'}`}>
+                      <div key={r.id} className={`flex items-center justify-between p-5 rounded-3xl border transition-all ${r.displayName === displayName ? 'bg-teal-50 border-teal-200' : 'bg-slate-50 border-transparent'}`}>
                         <div className="flex items-center space-x-5">
                           <span className={`w-10 h-10 flex items-center justify-center rounded-full text-lg font-black ${getMedalStyle(i)}`}>{i+1}</span>
                           <div className="flex flex-col text-left">
@@ -892,8 +894,8 @@
                               </div>
                               <div className="flex items-center gap-4">
                                 <span className="font-black text-slate-800 text-4xl">{r.speed} <span className="text-xs font-bold text-slate-400">{mKey==='en'?'WPM':'CPM'}</span></span>
-                                {isDeveloper && user && (
-                                  <button onClick={() => setRecordToDelete({ type: 'private', id: r.id })} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-xl transition-colors" title="刪除此紀錄">
+                                {isDeveloper && (
+                                  <button onClick={() => setRecordToDelete({ type: 'public', id: r.id })} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-xl transition-colors" title="刪除此紀錄">
                                     <Trash2 size={20} />
                                   </button>
                                 )}
@@ -956,14 +958,13 @@
                   <button onClick={() => setRecordToDelete(null)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all">取消</button>
                   <button onClick={async () => {
                     try {
-                      if (!user) {
+                      if (!db) {
                         alert("請確保在有 Firebase 權限的狀態下進行刪除。");
                         setRecordToDelete(null);
                         return;
                       }
-                      const deletePath = recordToDelete.type === 'public' 
-                        ? doc(db, 'artifacts', appId, 'public', 'data', 'scores', recordToDelete.id)
-                        : doc(db, 'artifacts', appId, 'users', user.uid, 'scores', recordToDelete.id);
+                      // 從公用大池中刪除該紀錄
+                      const deletePath = doc(db, 'artifacts', appId, 'public', 'data', 'scores', recordToDelete.id);
                       await deleteDoc(deletePath);
                       setRecordToDelete(null);
                     } catch(e) {
